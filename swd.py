@@ -12,6 +12,8 @@ from tensorflow.python.ops import math_ops, array_ops, random_ops, nn_ops
 import matplotlib.pyplot as plt
 import imageio
 import platform
+import ot
+from scipy.spatial.distance import cdist
 if platform.system() == 'Darwin':
     import matplotlib
     matplotlib.use('TkAgg')
@@ -44,6 +46,9 @@ def sort_rows(matrix, num_rows):
 
 def discrepancy_slice_wasserstein(p1, p2):
     s = array_ops.shape(p1)
+    #print(s)
+    #print("SHAPE of P1")
+    #1/0
     if p1.get_shape().as_list()[1] > 1:
         # For data more than one-dimensional, perform multiple random projection to 1-D
         proj = random_ops.random_normal([array_ops.shape(p1)[1], 128])
@@ -55,6 +60,34 @@ def discrepancy_slice_wasserstein(p1, p2):
     wdist = math_ops.reduce_mean(math_ops.square(p1 - p2))
     return math_ops.reduce_mean(wdist)
 
+
+def discrepancy_full_wasserstein(p1, p2):
+    #with tf.Session() as sess:
+    #    print(p1)
+
+    p1_d  = tf.reshape(math_ops.reduce_sum(math_ops.square(p1), 1), (-1,1))
+    p2_d  = tf.reshape(math_ops.reduce_sum(math_ops.square(p2), 1), (1,-1))
+    #p2_d  = math_ops.square(p2)
+    p_cross = math_ops.matmul(p1, array_ops.transpose(p2))
+    cost =p1_d + p2_d - 2.0 * p_cross
+    return math_ops.reduce_sum(cost)
+    print(p1_d)
+    print(p2_d)
+    print(cost)
+    1/0
+
+
+    """
+    print(p1)
+    print(p1.shape)
+    a = p1.eval()
+    b = p2.eval()
+    print(a)
+    print(a.shape)
+    """
+    #c0 = cdist(p1, p2, metric='sqeuclidean')
+    #gamma = ot.emd(ot.unif(p1.shape[0]), ot.unif(p2.shape[0]), c0)
+    return gamma
 
 def discrepancy_mcd(out1, out2):
     return tf.reduce_mean(tf.abs(out1 - out2))
@@ -79,7 +112,7 @@ def generate_grid_point():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-mode', type=str, default="adapt_swd",
-                        choices=["source_only", "adapt_mcd", "adapt_swd"])
+                        choices=["source_only", "adapt_mcd", "adapt_swd", "full_wass"])
     opts = parser.parse_args()
 
     # Load data
@@ -107,6 +140,8 @@ if __name__ == "__main__":
 
     if opts.mode == 'adapt_swd':
         loss_dis = discrepancy_slice_wasserstein(logits1_target, logits2_target)
+    elif opts.mode == 'full_wass':
+        loss_dis = discrepancy_full_wasserstein(logits1_target, logits2_target)
     else:
         loss_dis = discrepancy_mcd(logits1_target, logits2_target)
 
