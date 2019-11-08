@@ -100,6 +100,12 @@ class Trainer(object):
         cost =p1_d + p2_d - 2.0 * p_cross
         return math_ops.reduce_sum(self.gamma * cost)
         
+    def rs1_cost(self, p1, p2, h, f):
+        # v1 = tf.random.sample()
+        # g1 =  (f(p1, p2 + h * v1) - f(p1, p2 - h * v1)) * v1) / 2h
+        # g2 =  (f(p1 + h * v2, p2) - f(p1 - h * v2, p2)) * v2) / 2h
+        g = g1 + g2 / 2
+                
     
     def train(self):
 
