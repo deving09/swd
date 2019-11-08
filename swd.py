@@ -113,8 +113,8 @@ class Trainer(object):
         
     def rs1_cost(self, p1, p2, h, f):
         v1 = tf.random.sample()
-        g1 =  (f(p1, p2 + h * v1) - f(p1, p2 - h * v1)) * v1) / 2h
-        g2 =  (f(p1 + h * v2, p2) - f(p1 - h * v2, p2)) * v2) / 2h
+        g1 =  (f(p1, p2 + h * v1) - f(p1, p2 - h * v1) * v1) / 2h
+        g2 =  (f(p1 + h * v2, p2) - f(p1 - h * v2, p2) * v2) / 2h
         g = g1 + g2 / 2
                 
     
