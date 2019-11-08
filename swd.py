@@ -96,9 +96,9 @@ class Trainer(object):
         return tf.reduce_mean(tf.abs(out1 - out2))
     
     
-    def ot_matching_full(self, p1, p2, ot="emd"):
+    def ot_matching_full(self, p1, p2, trans="emd"):
         c0 = cdist(p1, p2, metric='sqeuclidean')
-        if ot == "sinkhorn":
+        if trans == "sinkhorn":
             gamma = ot.emd(ot.unif(p1.shape[0]), ot.unif(p2.shape[0]), c0)
         else:
             gamma = ot.sinkhorn(ot.unif(p1.shape[0]), ot.unif(p2.shape[0]), c0, 1e-1)
@@ -113,9 +113,9 @@ class Trainer(object):
         
     def rs1_cost(self, p1, p2, h, f):
         v1 = tf.random.sample()
-        g1 =  (f(p1, p2 + h * v1) - f(p1, p2 - h * v1) * v1) / 2h
-        g2 =  (f(p1 + h * v2, p2) - f(p1 - h * v2, p2) * v2) / 2h
-        g = g1 + g2 / 2
+        #g1 =  (f(p1, p2 + h * v1) - f(p1, p2 - h * v1) * v1) / 2h
+        #g2 =  (f(p1 + h * v2, p2) - f(p1 - h * v2, p2) * v2) / 2h
+        #g = g1 + g2 / 2
                 
     
     def train(self):
@@ -152,7 +152,7 @@ class Trainer(object):
         if self.opts.mode == 'adapt_swd':
             loss_dis = self.discrepancy_slice_wasserstein(logits1_target, logits2_target)
         elif self.opts.mode == 'full_wass' or self.opts.mode == 'sinkhorn' :
-            loss_dis = self.discrepancy_full_wasserstein(logits1_target, logits2_target))
+            loss_dis = self.discrepancy_full_wasserstein(logits1_target, logits2_target)
         else:
             loss_dis = self.discrepancy_mcd(logits1_target, logits2_target)
 
@@ -220,7 +220,7 @@ class Trainer(object):
                 if self.opts.mode == "sinkhorn":
                     p1, p2 = sess.run([logits1, logits2], 
                                                   feed_dict={X: x_s, Y: y_s, X_target:x_t})
-                    self.ot_matching_full(p1, p2, ot="sinkhorn")  
+                    self.ot_matching_full(p1, p2, trans="sinkhorn")  
                     
                 # Forward and backward propagation
                 _ = sess.run([train], feed_dict={X: x_s, Y: y_s, X_target: x_t})
@@ -240,7 +240,7 @@ class Trainer(object):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-mode', type=str, default="adapt_swd",
-                        choices=["source_only", "adapt_mcd", "adapt_swd", "full_wass"])
+                        choices=["source_only", "adapt_mcd", "adapt_swd", "full_wass", "sinkhorn"])
     
     
     opts = parser.parse_args()
