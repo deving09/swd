@@ -9,14 +9,23 @@ import tensorflow as tf
 from tensorflow.contrib.layers import fully_connected
 from tensorflow.contrib.framework import get_variables
 from tensorflow.python.ops import math_ops, array_ops, random_ops, nn_ops
-import matplotlib.pyplot as plt
+
 import imageio
 import platform
 import ot
+
 from scipy.spatial.distance import cdist
+import matplotlib
+matplotlib.use('pdf')
+#matplotlib.use('Agg')
+#matplotlib.use('TkAgg')
+import matplotlib.pyplot as plt
+
 if platform.system() == 'Darwin':
     import matplotlib
-    matplotlib.use('TkAgg')
+    matplotlib.use('pdf')
+    #matplotlib.use('Agg')
+    #matplotlib.use('TkAgg')
 
 
 
@@ -66,8 +75,7 @@ class Trainer(object):
         x_s, y_s, x_t = load_data()
         
         batch_size = y_s.shape[0]
-        self.gamma = tf.Variable(tf.zeros([batch_size, batch_size], 
-                                          dtype=tf.dtypes.float32), name="gamma")
+        self.gamma = tf.Variable(tf.zeros([batch_size, batch_size], dtype=tf.float32), name="gamma")
         self.opts = opts
         
 
