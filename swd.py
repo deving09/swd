@@ -4,6 +4,7 @@
 #
 from __future__ import print_function
 import argparse
+import math
 import numpy as np
 import tensorflow as tf
 from tensorflow.contrib.layers import fully_connected
@@ -13,6 +14,7 @@ from tensorflow.python.ops import math_ops, array_ops, random_ops, nn_ops
 import imageio
 import platform
 import ot
+import pmk
 
 from scipy.spatial.distance import cdist
 import matplotlib
@@ -65,6 +67,100 @@ def sort_rows(matrix, num_rows):
     matrix_T = array_ops.transpose(matrix, [1, 0])
     sorted_matrix_T = nn_ops.top_k(matrix_T, num_rows)[0]
     return array_ops.transpose(sorted_matrix_T, [1, 0])
+    
+    
+### Deconstructed PMK
+@tf.custom_gradient
+def rs2_cost(p1, p2):
+    
+    print(p1.shape)
+
+    # PMK key variables
+    min_n = -5.0
+    rng = 10.0
+    quants = [32, 24, 18]
+    shifts = [np.random.random() * rng/q for q in quants]
+    true_shifts = [ rng/q * s   for q, s in zip(quants, shifts)]
+    adj_rngs = [rng + rng/q * s   for q, s in zip(quants, shifts)]
+    
+    # Custom gradient key variables
+    h = 0.1
+    v1 = tf.random.normal(tf.shape(p2)) * h
+    v2 = tf.random.normal(tf.shape(p1)) * h
+    norm_v1 = tf.norm(v1)
+    norm_v2 = tf.norm(v2)
+    
+    def _encode(X, quant, shift, rng):
+        layers = []
+        while quant >= 1:
+            bin_locations = tf.cast(tf.math.floor((X + shift - min_n) * quant/rng),tf.int64)
+            dense_shape = tf.convert_to_tensor([quant] * X.shape[1], dtype=tf.int64) 
+            values = tf.ones(tf.shape(X)[0], dtype=tf.float32)
+            sparse_vec = tf.sparse.SparseTensor(indices=bin_locations, 
+                                      values=values, dense_shape=dense_shape)
+            layers.append(sparse_vec)
+            quant = math.floor(quant/2)
+        
+        return layers 
+    
+    def pyramid_encode(X):
+        pyramid = []
+        for i, (q, s, r) in enumerate(zip(quants, true_shifts, adj_rngs)):
+            pyramid.append(_encode(X, q, s, r))
+        
+        return pyramid
+    
+    def single_pyramid_matching(layers_1, layers_2, rng, quant, weight="max"):
+        scores = 0.0
+        matches = [0.0]
+        for i, (l1, l2) in enumerate(zip(layers_1, layers_2)):
+            if weight == 'max':
+                layer_weight = math.sqrt(math.pow(rng/quant, 2) * len(l1.shape))
+            elif weight == "min":
+                layer_weight = math.sqrt(math.pow(rng/(quant*4.0), 2))
+            elif weight == "mean":
+                layer_weight = math.sqrt(math.pow(rng/(quant*2.0), 2))
+            elif weight == "flat":
+                layer_weight = rng/quant
+                
+            
+            #mt = tf.stack([l1, l2])
+            match_count = tf.sparse.reduce_sum(tf.sparse.minimum(l1, l2))
+            matches.append(match_count)
+            scores += layer_weight * (match_count - matches[i])
+            quant = math.floor(quant/2)
+        
+        return scores
+    
+    def pmk_dist(pyramid_a, pyramid_b, weight="max", norm=True):
+        #dist = tf.Variable(0.0, name="dist")
+        dist = 0.0
+        for i, (layers_a, layers_b, r, q) in enumerate(zip(pyramid_a, pyramid_b, 
+                                                       adj_rngs, quants)):
+            d = single_pyramid_matching(layers_a, layers_b, r, q, weight=weight)
+            if norm:
+                a = single_pyramid_matching(layers_a, layers_a, r, q, weight=weight)
+                b = single_pyramid_matching(layers_b, layers_b, r, q, weight=weight)
+                dist += d / tf.math.sqrt(a*b)
+            else:
+                dist += d
+        
+        return dist
+    
+    def dist_calc(X, Y, sparse=True, weight="max", norm=True):
+        a = pyramid_encode(X)
+        b = pyramid_encode(Y)
+        return pmk_dist(a, b, weight=weight, norm=norm)
+    
+    
+    def grad(dy):
+        g1 =  (dist_calc(p1, p2 + v1) - dist_calc(p1, p2 - v1)) * v1 / (2 * norm_v1)
+        g2 =  (dist_calc(p1 + v2, p2) - dist_calc(p1 + v2, p2)) * v2 / (2 * norm_v2)
+        g = g1 + g2 / 2
+        #print(g.shape)
+        return g1 , g2
+    
+    return dist_calc(p1, p2), grad
 
 
 
@@ -77,6 +173,12 @@ class Trainer(object):
         batch_size = y_s.shape[0]
         self.gamma = tf.Variable(tf.zeros([batch_size, batch_size], dtype=tf.float32), name="gamma")
         self.opts = opts
+        if self.opts.mode == "pmk":
+            #REPLACE Hardcoded to test
+            self.pmker = pmk.PMK(10, min_n = -5.0)
+        
+        self.h = opts.alpha
+        
         
 
     def discrepancy_slice_wasserstein(self, p1, p2):
@@ -110,13 +212,17 @@ class Trainer(object):
         p_cross = math_ops.matmul(p1, array_ops.transpose(p2))
         cost =p1_d + p2_d - 2.0 * p_cross
         return math_ops.reduce_sum(self.gamma * cost)
+    
+    @tf.custom_gradient
+    def rs1_cost(self, p1, p2):
+        v1 = tf.random.normal(p2.shape)
+        v2 = tf.random.sample(p1.shape)
+        def grad(dy):
+            g1 =  (self.pmker.dist_calc(p1, p2 + self.h * v1) - self.pmker.dist_calc(p1, p2 - self.h * v1)) * v1 / (2 * self.h)
+            g2 =  (self.pmker.dist_calc(p1 + self.h * v2, p2) - self.pmker.dist_calc(p1 + self.h * v2, p2)) * v2 / (2 * self.h)
+            g = g1 + g2 / 2
         
-    def rs1_cost(self, p1, p2, h, f):
-        v1 = tf.random.sample()
-        #g1 =  (f(p1, p2 + h * v1) - f(p1, p2 - h * v1) * v1) / 2h
-        #g2 =  (f(p1 + h * v2, p2) - f(p1 - h * v2, p2) * v2) / 2h
-        #g = g1 + g2 / 2
-                
+        return self.pmker.dist_calc(p1, p2), grad                
     
     def train(self):
 
@@ -153,6 +259,10 @@ class Trainer(object):
             loss_dis = self.discrepancy_slice_wasserstein(logits1_target, logits2_target)
         elif self.opts.mode == 'full_wass' or self.opts.mode == 'sinkhorn' :
             loss_dis = self.discrepancy_full_wasserstein(logits1_target, logits2_target)
+        elif self.opts.mode == "pmk":
+            #loss_dis = self.pmker.dist_calc(logits1_target, logits2_target)
+            #loss_dis = self.rs1_cost(logits1_target, logits2_target)
+            loss_dis = rs2_cost(logits1_target, logits2_target)
         else:
             loss_dis = self.discrepancy_mcd(logits1_target, logits2_target)
 
@@ -240,7 +350,9 @@ class Trainer(object):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-mode', type=str, default="adapt_swd",
-                        choices=["source_only", "adapt_mcd", "adapt_swd", "full_wass", "sinkhorn"])
+                        choices=["source_only", "adapt_mcd", 
+                        "adapt_swd", "full_wass", "sinkhorn", "pmk"])
+    parser.add_argument( '--alpha', type=float, default=0.1)
     
     
     opts = parser.parse_args()
